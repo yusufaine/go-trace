@@ -15,8 +15,8 @@ func InitMsg(config *Config) {
 		sb.WriteString(fmt.Sprintf(" [%s]", IPv4ToString(config.TargetIp)))
 	}
 	sb.WriteString("\n")
-	sb.WriteString(fmt.Sprintf("from %s:%d,", IPv4ToString(config.SourceIp), config.SourcePort))
-	sb.WriteString(fmt.Sprintf("max hop %d,", config.MaxHops))
+	sb.WriteString(fmt.Sprintf("from %s:%d, ", IPv4ToString(config.SourceIp), config.SourcePort))
+	sb.WriteString(fmt.Sprintf("max hop %d, ", config.MaxHops))
 	sb.WriteString(fmt.Sprintf("timeout %s\n", config.TimeoutSec.String()))
 	sb.WriteString("\n")
 	fmt.Printf(sb.String())

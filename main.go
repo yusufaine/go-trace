@@ -10,7 +10,7 @@ import (
 
 func main() {
 	var config util.Config
-	flag.StringVar(&config.TargetName, "t", "1.1.1.1", "target host")
+	flag.StringVar(&config.TargetName, "t", "", "target host, must be supplied")
 	flag.IntVar(&config.MaxHops, "hops", 32, "max hops, must be greater than 0")
 	flag.IntVar(&config.TargetPort, "port", 80, "target port, must be valid port number")
 	flag.DurationVar(&config.TimeoutSec, "timeout", 3*time.Second, "timeout in seconds, must be greater than 0")
