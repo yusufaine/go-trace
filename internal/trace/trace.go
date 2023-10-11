@@ -1,82 +1,101 @@
 package trace
 
 import (
+	"crypto/rand"
 	"fmt"
-	"syscall"
+	"net"
 	"time"
 
 	"github.com/yusufaine/go-tracert/internal/util"
+	"golang.org/x/net/icmp" // provides convenience functions for working with ICMP messages
+	"golang.org/x/net/ipv4" // wrapper over syscall for ipv4
 )
 
-func Trace(config Config) {
-	targetIp := util.ResolveTargetHostname(config.Target)
-	fmt.Printf("Tracing route to %s [%s] from %s:%d\n",
-		config.Target,
-		util.IPv4ToString(targetIp),
-		util.IPv4ToString(config.SourceIp),
-		config.SourcePort)
+func Trace(config *util.Config) {
+	util.InitMsg(config)
 
-	var found bool
-	for ttl := 1; ttl <= config.MaxHops && !found; ttl++ {
-		startTime := time.Now()
-		// create tcp socket
-		sendSock, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_TCP)
-		if err != nil {
-			panic("error creating send socket: " + err.Error())
-		}
-		defer syscall.Close(sendSock)
+	// Raw socket that listens for ICMP, requires root permissions
+	sock, err := icmp.ListenPacket("ip4:icmp", util.IPv4ToString(config.SourceIp))
+	if err != nil {
+		panic("error creating recv socket: " + err.Error())
+	}
+	defer sock.Close()
 
-		// set ttl
-		if err := syscall.SetsockoptInt(sendSock, 0x0, syscall.IP_TTL, ttl); err != nil {
+	var (
+		id      = 42068
+		reached = false
+		seq     = 0
+	)
+	for ttl := 1; ttl <= config.MaxHops && !reached; ttl++ {
+		// Set TTL at every hop
+		if err := sock.IPv4PacketConn().SetTTL(ttl); err != nil {
 			panic("error setting ttl: " + err.Error())
 		}
+		seq++
 
-		// set timeout
-		if err := syscall.SetsockoptTimeval(sendSock, syscall.SOL_SOCKET, syscall.SO_SNDTIMEO, &syscall.Timeval{Sec: 1}); err != nil {
-			panic("error setting timeout: " + err.Error())
+		// Craft ICMP message, values obtained from wireshark
+		icmpBody := &icmp.Echo{
+			ID:   id,
+			Seq:  seq,
+			Data: make([]byte, 48),
+		}
+		rand.Read(icmpBody.Data[:])
+		msg := icmp.Message{
+			Type: ipv4.ICMPTypeEcho, // 8
+			Code: 0,
+			Body: icmpBody,
 		}
 
-		// create raw icmp socket
-		recvSock, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_RAW, syscall.IPPROTO_ICMP)
+		// Serialise ICMP message
+		msgBytes, err := msg.Marshal(nil)
 		if err != nil {
-			panic("error creating recv socket: " + err.Error())
+			panic("error serialising icmp message: " + err.Error())
 		}
-		defer syscall.Close(recvSock)
 
-		// set timeout
-		if err := syscall.SetsockoptTimeval(recvSock, syscall.SOL_SOCKET, syscall.SO_RCVTIMEO, &syscall.Timeval{Sec: 1}); err != nil {
+		// Record when message was sent over the wire
+		start := time.Now()
+		dst := &net.IPAddr{IP: config.TargetIp[:]}
+		if _, err := sock.WriteTo(msgBytes, dst); err != nil {
+			// Print error and attempt to continue
+			fmt.Printf("%d: error detected: %v\n", ttl, err)
+			continue
+		}
+
+		// Set timeout from now
+		if err := sock.SetReadDeadline(time.Now().Add(config.TimeoutSec)); err != nil {
 			panic("error setting timeout: " + err.Error())
 		}
 
-		// bind to host address
-		hostSa := syscall.SockaddrInet4{Addr: config.SourceIp, Port: config.SourcePort}
-		if err := syscall.Bind(recvSock, &hostSa); err != nil {
-			panic("error binding recv socket: " + err.Error())
-		}
-
-		// connect to target
-		targetSa := syscall.SockaddrInet4{Addr: targetIp, Port: config.Port}
-		if err := syscall.Connect(sendSock, &targetSa); err != nil {
-			if err == syscall.ECONNREFUSED {
-				util.PrintOutput(ttl, targetIp, 0)
-				break
+		// Read reply
+		reply := make([]byte, 256)
+		n, from, err := sock.ReadFrom(reply)
+		if err != nil {
+			// Check if error was due to timeout
+			if opErr, ok := err.(*net.OpError); ok && opErr.Timeout() {
+				util.PrintOutput(ttl)
+			} else { // Unknown error case, try to continue
+				util.PrintOutput(ttl, util.WithMsg("unable to read from socket: "+err.Error()))
 			}
-
-			// receive ICMP packet
-			var buf [512]byte
-			_, from, err := syscall.Recvfrom(recvSock, buf[:], 0)
-			if err != nil {
-				panic("error receiving icmp packet: " + err.Error())
-			}
-			util.PrintOutput(ttl, from.(*syscall.SockaddrInet4).Addr, time.Since(startTime))
 			continue
-		} else {
-			found = true
-			util.PrintOutput(ttl, targetIp, time.Since(startTime))
 		}
-	}
 
-	if !found {
-		fmt.Println("Unable to reach target, max hops reached")
+		reached = from.String() == util.IPv4ToString(config.TargetIp)
+
+		// https://www.iana.org/assignments/protocol-numbers/protocol-numbers.xhtml
+		replyMsg, err := icmp.ParseMessage(1, reply[:n])
+		if err != nil { // Unknown error case, try to continue
+			util.PrintOutput(ttl, util.WithMsg("unable to parse ICMP message: "+err.Error()))
+			continue
+		}
+
+		switch replyMsg.Type {
+		case ipv4.ICMPTypeEchoReply, ipv4.ICMPTypeTimeExceeded: // If target reached or TTL hit 0
+			echoReply, ok := msg.Body.(*icmp.Echo)
+			// Ignore ff reply is not ICMP echo reply, or does not match ID or seq num
+			if !ok || echoReply.ID != id || echoReply.Seq != seq {
+				continue
+			}
+			util.PrintOutput(ttl, util.WithHopInfo(from.String(), start))
+		}
 	}
 }
