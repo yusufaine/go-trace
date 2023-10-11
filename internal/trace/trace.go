@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/yusufaine/go-tracert/internal/util"
-	"golang.org/x/net/icmp" // provides convenience functions for working with ICMP messages
+	"golang.org/x/net/icmp" // to de-/serialise ICMP messages, similar to "pack" in python
 	"golang.org/x/net/ipv4" // wrapper over syscall for ipv4
 )
 
@@ -47,7 +47,7 @@ func Trace(config *util.Config) {
 		}
 
 		// Serialise ICMP message
-		msgBytes, err := msg.Marshal(nil)
+		msgBytes, err := msg.Marshal(nil) // similar to "pack" in python
 		if err != nil {
 			panic("error serialising icmp message: " + err.Error())
 		}
