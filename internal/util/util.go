@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func GetIpAddr(host string) [4]byte {
+func ResolveTargetHostname(host string) [4]byte {
 	ipAddr, err := net.ResolveIPAddr("ip", host)
 	if err != nil {
 		panic("error resolving ip address: " + err.Error())
