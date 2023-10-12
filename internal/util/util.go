@@ -10,9 +10,9 @@ import (
 func InitMsg(config *Config) {
 	var sb strings.Builder
 	sb.WriteString("Tracing route to ")
-	sb.WriteString(config.TargetName)
+	sb.WriteString(config.TargetName + ":" + fmt.Sprint(config.TargetPort))
 	if config.TargetName != IPv4ToString(config.TargetIp) {
-		sb.WriteString(fmt.Sprintf(" [%s]", IPv4ToString(config.TargetIp)))
+		sb.WriteString(fmt.Sprintf(" [%s:%d]", IPv4ToString(config.TargetIp), config.TargetPort))
 	}
 	sb.WriteString("\n")
 	sb.WriteString(fmt.Sprintf("from %s:%d, ", IPv4ToString(config.SourceIp), config.SourcePort))
@@ -37,7 +37,6 @@ func IPv4ToString(ipAddr [4]byte) string {
 }
 
 type printStruct struct {
-	ttl       int
 	ipAddr    string
 	rtt       time.Duration
 	customMsg string
@@ -59,25 +58,29 @@ func WithMsg(msg string) printOption {
 }
 
 func PrintOutput(ttl int, opts ...printOption) {
-	ps := printStruct{ttl: ttl}
+	var ps printStruct
 	for _, opt := range opts {
 		opt(&ps)
 	}
 
 	if len(ps.customMsg) > 0 {
-		fmt.Printf("  %d: %s\n", ps.ttl, ps.customMsg)
+		if ttl == 0 {
+			fmt.Printf("  %s\n", ps.customMsg)
+		} else {
+			fmt.Printf("  %d: %s\n", ttl, ps.customMsg)
+		}
 		return
 	}
 
 	if len(ps.ipAddr) == 0 {
-		fmt.Printf("  %d: *\n", ps.ttl)
+		fmt.Printf("  %d: *\n", ttl)
 		return
 	} else if net.ParseIP(ps.ipAddr).To4() == nil {
 		panic(fmt.Sprintf("expected IPv4, received: %v", ps.ipAddr))
 	}
 
 	PadIpAddress(&ps.ipAddr, 15) // 15 is the length of the longest IPv4 address
-	fmt.Printf("  %d: %s\t%.2fms\n", ps.ttl, ps.ipAddr, float32(ps.rtt.Microseconds())/1000)
+	fmt.Printf("  %d: %s\t%.2fms\n", ttl, ps.ipAddr, float32(ps.rtt.Microseconds())/1000)
 }
 
 // Takes in a string pointer and adds spaces to the end of the string until it is the desired length

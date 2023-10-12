@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"net"
+	"os"
 	"time"
 
 	"github.com/yusufaine/go-tracert/internal/util"
@@ -22,7 +23,7 @@ func Trace(config *util.Config) {
 	defer sock.Close()
 
 	var (
-		id      = 42068
+		id      = os.Getpid() & 0xffff
 		reached = false
 		seq     = 0
 	)
@@ -31,15 +32,17 @@ func Trace(config *util.Config) {
 		if err := sock.IPv4PacketConn().SetTTL(ttl); err != nil {
 			panic("error setting ttl: " + err.Error())
 		}
+
+		// Increment sequence number
 		seq++
 
 		// Craft ICMP message, values obtained from wireshark
 		icmpBody := &icmp.Echo{
-			ID:   id,
-			Seq:  seq,
+			ID:   id,  // 16 bit ID
+			Seq:  seq, // 16 bit sequence number
 			Data: make([]byte, 48),
 		}
-		rand.Read(icmpBody.Data[:])
+		rand.Read(icmpBody.Data[:]) // fill with random bytes
 		msg := icmp.Message{
 			Type: ipv4.ICMPTypeEcho, // 8
 			Code: 0,
@@ -97,5 +100,9 @@ func Trace(config *util.Config) {
 			}
 			util.PrintOutput(ttl, util.WithHopInfo(from.String(), start))
 		}
+	}
+
+	if !reached {
+		util.PrintOutput(0, util.WithMsg("unable to reach destination, max hops reached"))
 	}
 }

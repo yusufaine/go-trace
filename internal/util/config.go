@@ -1,6 +1,7 @@
 package util
 
 import (
+	"fmt"
 	"net"
 	"time"
 )
@@ -25,9 +26,10 @@ func (c *Config) PopulateConfig() {
 	copy(c.TargetIp[:], targetIp.IP.To4())
 
 	// Let OS choose source IP and port
-	con, err := net.DialTCP("tcp", nil, &net.TCPAddr{IP: targetIp.IP, Port: 80})
+	d := net.Dialer{Timeout: c.TimeoutSec}
+	con, err := d.Dial("tcp", targetIp.String()+":"+fmt.Sprint(c.TargetPort))
 	if err != nil {
-		panic("unable to dial target address: " + err.Error())
+		panic("unable to connect to target address: " + targetIp.String() + ":" + fmt.Sprint(c.TargetPort))
 	}
 	defer con.Close()
 
